@@ -1,0 +1,105 @@
+---
+title: "metaDataNew"
+author: "Orfeas Gkourlias"
+date: "2023-09-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library("plyr")
+library(kableExtra)
+library(SRAdb)
+knitr::opts_chunk$set(echo = TRUE)
+rawDf <- read.delim("samplesWithPrediction_16_09_22_noOutliers.txt", sep = "\t", quote = "")
+df <- rawDf
+```
+
+# Short Summary of selected RNA-Seq data sets.
+The relevant file contains sample metadata originating from various tissues.
+
+```{r}
+colnames(df)[colnames(df) == "X"] <- "id"
+
+kbl(df[0:5,]) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+### Tissue Prediction
+Some of the tissue types had to be predicted. Most but not all predictions were
+correct.
+
+```{r echo=TRUE}
+nrow(df[df$misclasified == "TRUE",])
+df$Tissue <- df$predictedTissue
+df[df$misclasified == "TRUE",]$Tissue <- df[df$misclasified == "TRUE",]$annotatedTissue
+```
+Only 221 samples were incorrectly classified. The predicted tissues can simply be
+replaced with the annotated ones.
+
+Because the goal of the project is to validate the blood EQTLs, the blood samples
+will be omitted.
+```{r echo=TRUE}
+df <- df[grep("Blood", df$Tissue, ignore.case = TRUE, invert = TRUE),]
+nrow(rawDf) - nrow(df)
+```
+This sows that 8181 samples were removed from the dataframe because they come
+from blood.
+
+### Tissue counts within studies.
+To make sure the sample sizes for every tissue/project combination is enough, 30
+was chosen as the threshold. This is how many samples will be omitted when
+adhering to that threshold.
+
+
+
+```{r echo=TRUE}
+tissue_project <- df[,c("Tissue","study")]
+tissue_per_project <- count(tissue_project)
+below30 <- tissue_per_project[tissue_per_project$freq < 30,]
+tissue_per_project <- tissue_per_project[tissue_per_project$freq >= 30,]
+tissue_per_project <- tissue_per_project[order(tissue_per_project$freq,decreasing=TRUE),]
+nrow(tissue_per_project)
+kbl(tissue_per_project[0:10,]) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+Now for the study/tissue combinations with less than 30 samples.
+```{r echo=TRUE}
+nrow(below30)
+kbl(below30[0:10,]) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+That is 1797 Tissue/Study combinations with less than 30 samples.
+There are 231 Tissue/Study combinations with 30 or more samples.
+Which might look like a lot at first glance, but the ones with 30+
+should contain many more samples.
+
+```{r echo=TRUE}
+sum(tissue_per_project$freq)
+sum(below30$freq)
+
+sum(below30$freq) / (sum(tissue_per_project$freq) + sum(below30$freq)) * 100
+```
+Combinations with more than or equal to 30 is 27222 while the
+combinations with lass than 30 samples covers 11007 samples, which is 28.79%`
+
+Now to make the new dataframe without the lower sample counts.
+
+```{r echo=TRUE}
+remove_mark <- c()
+
+for (df_i in 1:50) {
+  for (below30_i in 1:nrow(below30)) {
+    status <- FALSE
+    if (below30[below30_i,]$study == df[df_i,c("Tissue", "study")]$study &&
+        below30[below30_i,]$Tissue == df[df_i,c("Tissue", "study")]$Tissue) {
+      status <- TRUE
+      break
+    }
+  }
+  remove_mark <- append(remove_mark, status)
+}
+
+df$too_low <- remove_mark
+write.csv(df, 'test.csv', )
+test_df <- read.csv("test.csv", row.names = 1)
+```

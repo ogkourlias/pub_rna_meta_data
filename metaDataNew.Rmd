@@ -87,19 +87,23 @@ Now to make the new dataframe without the lower sample counts.
 ```{r echo=TRUE}
 remove_mark <- c()
 
-for (df_i in 1:50) {
+for (df_i in 1:nrow(df)) {
   for (below30_i in 1:nrow(below30)) {
     status <- FALSE
-    if (below30[below30_i,]$study == df[df_i,c("Tissue", "study")]$study &&
-        below30[below30_i,]$Tissue == df[df_i,c("Tissue", "study")]$Tissue) {
+    
+    if (below30[below30_i,]$study == df[df_i,]$study &&
+        below30[below30_i,]$Tissue == df[df_i,]$Tissue) {
       status <- TRUE
+      remove_mark <- append(remove_mark, status)
       break
     }
   }
-  remove_mark <- append(remove_mark, status)
+    if (status == FALSE)
+      remove_mark <- append(remove_mark, status)
 }
 
 df$too_low <- remove_mark
 write.csv(df, 'test.csv', )
 test_df <- read.csv("test.csv", row.names = 1)
+
 ```

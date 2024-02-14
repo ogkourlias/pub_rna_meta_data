@@ -1,0 +1,493 @@
+---
+title: "metaDataNew"
+author: "Orfeas Gkourlias"
+date: "2023-09-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library("plyr")
+library(kableExtra)
+library(ggplot2)
+library(treemapify)
+library(ggpubr)
+library(stringr)
+library(webshot)
+library(magick)
+library(RColorBrewer)
+knitr::opts_chunk$set(echo = TRUE)
+rawDf <- read.delim("samplesWithPrediction_16_09_22_noOutliers.txt", sep = "\t", quote = "")
+df <- rawDf
+```
+
+# Short Summary of selected RNA-Seq data sets.
+The relevant file contains sample metadata originating from various tissues.
+
+```{r}
+colnames(df)[colnames(df) == "X"] <- "id"
+
+kbl(df[0:5,]) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+### Tissue Prediction
+Some of the tissue types had to be predicted. Most but not all predictions were
+correct.
+
+```{r echo=TRUE}
+nrow(df[df$misclasified == "TRUE",])
+df$Tissue <- df$predictedTissue
+df[df$misclasified == "TRUE",]$Tissue <- df[df$misclasified == "TRUE",]$annotatedTissue
+nrow(df)
+```
+Only 221 samples were incorrectly classified. The predicted tissues can simply be
+replaced with the annotated ones.
+
+### Tissue counts within studies.
+To make sure the sample sizes for every tissue/project combination is enough, 30
+was chosen as the threshold. This is how many samples will be omitted when
+adhering to that threshold.
+
+
+
+```{r echo=TRUE}
+tissue_project <- df[,c("Tissue","study")]
+tissue_per_project <- count(tissue_project)
+tissue_per_project <- tissue_per_project[order(tissue_per_project$freq,decreasing=TRUE),]
+
+tissues <- count(df[,c("Tissue")])
+tissues <- tissues[order(tissues$freq,decreasing=TRUE),]
+colnames(tissues)[colnames(tissues) == "x"] <- "Tissue"
+
+tissues$Tissue <- str_replace(tissues$Tissue, "cardiac-organoids_cardiac progenitors_derived-cardiomyocytes", "Cardiomyocytes")
+tissues$Tissue <- str_replace(tissues$Tissue, "Brain-Nucleus accumbens (basal ganglia)", "BNA basal ganglia")
+tissues$Tissue <- str_replace(tissues$Tissue, "derived-neural-progenitor_derived-neurons", "derived-neurons")
+tissues$Tissue <- str_replace(tissues$Tissue, "Salivary Gland-Minor Salivary Gland", "Salivary Gland Min.")
+tissues$Tissue <- str_replace(tissues$Tissue, "fibroblasts_cell-lines_smooth-muscle-cell_mesenchymal-stem-cells", "cell_mesenchymal")
+tissues$Tissue <- str_replace(tissues$Tissue, "derived-neural-progenitors_derived-astrocytes", "derived-astrocytes")
+tissues$Tissue <- str_replace(tissues$Tissue, "cartilage/tenosynovium", "tenosynovium")
+tissues$Tissue <- str_replace(tissues$Tissue, "Brain-Caudate (basal ganglia)", "BC basal ganglia")
+tissues$Tissue <- str_replace(tissues$Tissue, "Brain-Cerebellar Hemisphere", "BCe. Hemis.")
+tissues$Tissue <- str_replace(tissues$Tissue, "Brain-Spinal Cord (cervical c-1)", "Cerv. C-1")
+
+tissues$Tissue <- str_wrap(tissues$Tissue,  whitespace_only = FALSE, width = 1)
+
+projects <- count(df[,c("study")])
+projects <- projects[order(projects$freq,decreasing=TRUE),]
+colnames(projects)[colnames(projects) == "x"] <- "study"
+
+cols <- colorRampPalette(brewer.pal(8, "Dark2"))(60)
+
+ggplot(tissues, aes(area = freq, fill = Tissue,
+               label = paste(Tissue, freq, sep = "\n"))) +
+  geom_treemap() +
+  geom_treemap_text(colour = "white",
+                    place = "centre",
+                    size = 24) +
+  theme(legend.position = "none") +
+  scale_fill_manual(values = cols)
+
+ggsave(
+  "plots/pbulic_distribution.png",
+  plot = last_plot(),
+  scale = 1,
+  width = 24,
+  height = 20,
+  dpi = 300
+)
+
+# ggplot(tissues[1:27,], aes(x = Tissue, y = freq)) + 
+#   geom_bar(stat = "identity", width = 0.75) +  
+#   theme(axis.text.x = element_text(hjust=1)) +
+#   coord_flip() +
+#   labs(y = "Tissue frequency (n=46410)")
+# 
+# ggplot(tissues[28:49,], aes(x = Tissue, y = freq)) + 
+#   geom_bar(stat = "identity", width = 0.75) +  
+#   theme(axis.text.x = element_text(hjust=1)) +
+#   coord_flip() +
+#   labs(y = "Tissue frequency (n=46410)")
+# 
+# ggplot(tissues[50:60,], aes(x = Tissue, y = freq)) + 
+#   geom_bar(stat = "identity", width = 0.75) +  
+#   theme(axis.text.x = element_text(hjust=1)) +
+#   coord_flip() +
+#   labs(y = "Tissue frequency (n=46410)")
+
+# kbl(tissues) %>%
+#   kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+#   scroll_box(height = "500px", width = "300px")
+# 
+# kbl(projects) %>%
+#   kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+#   scroll_box(height = "500px", width = "300px")
+# 
+# kbl(tissue_per_project) %>%
+#   kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+#   scroll_box(height = "500px", width = "500px")
+```
+Now for the study/tissue combinations with less than 30 samples.
+```{r echo=TRUE}
+
+left <- c(nrow(tissue_per_project[tissue_per_project$freq >= 60,]),
+                nrow(tissue_per_project[tissue_per_project$freq >= 50,]),
+                nrow(tissue_per_project[tissue_per_project$freq >= 40,]),
+                nrow(tissue_per_project[tissue_per_project$freq >= 30,]),
+                nrow(tissue_per_project[tissue_per_project$freq >= 20,]),
+                nrow(tissue_per_project[tissue_per_project$freq >= 10,]))
+
+lost <- nrow(tissue_per_project) - left
+
+df$tissue_study <- paste(df$Tissue,df$study)
+tissue_per_project$tissue_study <- paste(tissue_per_project$Tissue,tissue_per_project$study)
+
+df_merge <- merge(df, tissue_per_project, by = "tissue_study")
+
+samples_left <- c(nrow(df_merge[df_merge$freq >= 60,]),
+                nrow(df_merge[df_merge$freq >= 50,]),
+                nrow(df_merge[df_merge$freq >= 40,]),
+                nrow(df_merge[df_merge$freq >= 30,]),
+                nrow(df_merge[df_merge$freq >= 20,]),
+                nrow(df_merge[df_merge$freq >= 10,]))
+
+samples_lost <- nrow(df) - samples_left
+study_left_df <- data.frame(threshold = c(60,50,40,30,20,10),
+                            studies_left = left,
+                            studies_lost = lost,
+                            samples_left = samples_left,
+                            samples_lost = samples_lost)
+
+tissues_selected <- count(df_merge[df_merge$freq >= 30, c("Tissue")])
+# kbl(tissue_per_project[tissue_per_project$freq < 30,]) %>%
+#   kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+#   scroll_box(height = "500px", width = "500px")
+# 
+# nrow(tissue_per_project[tissue_per_project$freq < 30,])
+# nrow(tissue_per_project[tissue_per_project$freq >= 30,])
+# kbl(tissue_per_project[tissue_per_project$freq < 30,]) %>%
+#   kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+#   scroll_box(height = "500px", width = "500px")
+
+colnames(study_left_df) = c("Minimum Threshold", "Studies Discarded", "Studies Kept",
+                            "Samples Discarded", "Samples Kept")
+
+#study_left_df %>%
+  #kbl(caption = "Threshold Summaries for Tissue/Study Frequencies") %>%
+  #kable_classic(full_width = F, html_font = "Calibri") %>%
+  #row_spec(seq(1, nrow(study_left_df), 1),extra_css = "border-bottom: 1px solid;") %>%
+  #save_kable("plots/thresholds.pdf", density = 3000)
+
+
+# kbl(study_left_df) %>%
+#   kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+#   save_kable("plots/thresholds.png")
+```
+
+That is 1797 Tissue/Study combinations with less than 30 samples.
+There are 231 Tissue/Study combinations with 30 or more samples.
+Which might look like a lot at first glance, but the ones with 30+
+should contain many more samples.
+
+```{r echo=TRUE}
+sum(tissue_per_project$freq)
+sum(tissue_per_project[tissue_per_project$freq < 30,]$freq)
+
+sum(tissue_per_project[tissue_per_project$freq < 30,]$freq) / (sum(tissue_per_project[tissue_per_project$freq >= 30,]$freq) + sum(tissue_per_project[tissue_per_project$freq < 30,]$freq)) * 100
+```
+Combinations with more than or equal to 30 is 27222 while the
+combinations with less than 30 samples covers 11007 samples, which is 28.79%`
+
+Now to make the new dataframe without the lower sample counts.
+
+We are now left with 27222 samples of which the study sizes are appropriate.
+
+This is what the final data frame looks like.
+```{r echo = TRUE}
+z <- df
+z[(z$study != "GTEx"),]$study <- "other"
+y <- count(z[, c("Tissue", "study")])
+y <- y[order(y$Tissue),]
+
+nrow(z[z$study != "GTEx",])
+nrow(z[z$study == "GTEx",])
+
+tissue_count <- count(df$Tissue)
+tissue_count <- tissue_count[order(tissue_count$freq, decreasing = TRUE),]
+
+thresholds <- c(nrow(df[df$proj_tiss_freq < 60,]),
+                nrow(df[df$proj_tiss_freq < 50,]),
+                nrow(df[df$proj_tiss_freq < 40,]),
+                nrow(df[df$proj_tiss_freq < 30,]),
+                nrow(df[df$proj_tiss_freq < 20,]),
+                nrow(df[df$proj_tiss_freq < 10,]))
+
+percs <- round(thresholds/nrow(df) * 100, 0)
+
+
+threshold_df <- data.frame(t(thresholds))
+threshold_df[2,] <- t(percs)
+
+colnames(tissue_count) = c("Tissue", "Frequency") 
+
+colnames(threshold_df) <- c("threshold_60", "threshold_50", "threshold_40", "threshold_30", "threshold_20", "threshold_10")
+
+rownames(threshold_df) <- c("n_samples", "percentage")
+
+#ggplots
+options(repr.plot.width = 5, repr.plot.height =2)
+
+ggplot(y[1:27,], aes(x = Tissue, y = freq, fill = study)) + 
+  geom_bar(stat = "identity", width = 0.75) +  
+  theme(axis.text.x = element_text(hjust=1)) +
+  coord_flip() +
+  labs(y = "Tissue frequency (n=46410)")
+
+ggplot(y[1:27,], aes(x = Tissue, y = freq, fill = study)) + 
+  geom_bar(stat = "identity", width = 0.75) +  
+  theme(axis.text.x = element_text(hjust=1)) +
+  coord_flip() +
+  labs(y = "Tissue frequency (n=46410)")
+
+ggplot(y[28:49,], aes(x = Tissue, y = freq, fill = study)) + 
+  geom_bar(stat = "identity", width = 0.75) +  
+  theme(axis.text.x = element_text(hjust=1)) +
+  coord_flip() +
+  labs(y = "Tissue frequency (n=46410)")
+
+ggplot(y[50:69,], aes(x = Tissue, y = freq, fill = study)) + 
+  geom_bar(stat = "identity", width = 0.75) +  
+  theme(axis.text.x = element_text(hjust=1)) +
+  coord_flip() +
+  labs(y = "Tissue frequency (n=46410)")
+
+ggplot(y[70:89,], aes(x = Tissue, y = freq, fill = study)) + 
+  geom_bar(stat = "identity", width = 0.75) +  
+  theme(axis.text.x = element_text(hjust=1)) +
+  coord_flip() +
+  labs(y = "Tissue frequency (n=46410)")
+
+kbl(tissue_per_project) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+  scroll_box(height = "500px")
+
+
+kbl(tissue_count) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+  scroll_box(height = "500px")
+
+kbl(threshold_df) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+  scroll_box(height = "500px")
+```
+
+Now to save the new dataframe to a file.
+```{r}
+write.csv(df, "selected_samples_final.csv")
+tissue_project <- df[,c("Tissue","study")]
+tissue_per_project <- count(tissue_project)
+tissue_per_project <- tissue_per_project[order(tissue_per_project$freq,decreasing=TRUE),]
+kbl(tissue_per_project[0:10,]) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+  scroll_box(height = "500px")
+```
+```{r}
+
+```
+
+```{r}
+three_proj_df <- df 
+three_proj_df[(three_proj_df$study != "GTEx" & three_proj_df$study != "TCGA"),]$study <- "other"
+gtex_count <- count(three_proj_df[,c("Tissue", "study")][three_proj_df$study == "GTEx",])
+tcga_count <- count(three_proj_df[,c("Tissue", "study")][three_proj_df$study == "TCGA",])
+other_count <- count(three_proj_df[,c("Tissue", "study")][three_proj_df$study == "other",])
+gtex_count <- gtex_count[,c(1,3)]
+tcga_count <- tcga_count[,c(1,3)]
+other_count <- other_count[,c(1,3)]
+colnames(gtex_count) <- c("Tissue", "gtex_freq")
+colnames(tcga_count) <- c("Tissue", "tcga_freq")
+colnames(other_count) <- c("Tissue", "other_freq")
+
+df_list <- list(gtex_count, tcga_count, other_count)
+merged_count <- Reduce(function(x, y) merge(x, y, all=TRUE), df_list, accumulate=FALSE)
+merged_count
+# 
+merged_count[is.na(merged_count)] <- 0
+
+merged_count$total <- merged_count$gtex_freq + merged_count$tcga_freq + merged_count$other_freq
+kbl(merged_count) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+  scroll_box(height = "500px")
+
+write.csv(merged_count, "09-01-2024public_rna_tiss_proj_sum.csv")
+
+y <- y[order(y$freq, decreasing = TRUE),]
+
+
+ggplot(y[1:10,], aes(x = Tissue, y = freq, fill = study)) + 
+  geom_bar(stat = "identity", width = 0.75) +  
+  theme(axis.text.x = element_text(hjust=1)) +
+  coord_flip() +
+  labs(y = "Tissue frequency (n=46410)")
+
+```
+```{r}
+merged_count <- merged_count %>%
+  mutate(Tissue = ifelse(Tissue == "fibroblasts_cell-lines_smooth-muscle-cell_mesenchymal-stem-cells",
+                         "Mesenchymal Cells",
+                         Tissue))
+
+merged_count <- merged_count %>%
+  mutate(Tissue = ifelse(Tissue == "derived-neural-progenitor_derived-neurons",
+                          "Derived Neurons",
+                         Tissue))
+merged_count <- merged_count[order(merged_count$total, decreasing = TRUE), ]
+top_10 <- head(merged_count, 10)
+top_10_long <- tidyr::pivot_longer(top_10, cols = c("gtex_freq", "tcga_freq", "other_freq"))
+
+top_10_long$Tissue <- factor(top_10_long$Tissue, levels = top_10$Tissue)
+
+colnames(top_10_long)[3] = "Study"
+
+ggplot(top_10_long, aes(x = Tissue, y = value, fill = Study)) + 
+  geom_bar(stat = "identity", width = 0.75) +  
+  theme(axis.text.x = element_text(hjust=1)) +
+  coord_flip() +
+  labs(y = "Frequency") +
+  ggtitle("Top 10 tissue frequencies (n=26,092)") +
+  scale_fill_discrete(labels=c('GTEx', 'Other', 'TCGA'))
+
+ggsave(
+  "most.png",
+  plot = last_plot(),
+  scale = 1,
+  width = 12,
+  height = 8,
+  dpi = 300
+)
+```
+```{r}
+studies <- projects[order(projects$freq, decreasing = TRUE),]
+studies <- studies[1:10,]
+
+transform(studies, study = reorder(study, freq))
+
+ggplot(studies, aes(x =  reorder(study, freq), y = freq )) + 
+  geom_bar(stat = "identity", width = 0.75) +  
+  theme(axis.text.x = element_text(hjust=1)) +
+  coord_flip() +
+  labs(y = "Frequency") +
+  ggtitle("Top 10 study  frequencies (n=16,045)")
+
+ggsave(
+  "studies.png",
+  plot = last_plot(),
+  scale = 1,
+  width = 12,
+  height = 8,
+  dpi = 300
+)
+```
+```{r}
+df <- df[df$proj_tiss_freq >= 30,]
+df
+```
+
+
+```{r}
+three_proj_df <- df 
+three_proj_df[(three_proj_df$study != "GTEx" & three_proj_df$study != "TCGA"),]$study <- "other"
+gtex_count <- count(three_proj_df[,c("Tissue", "study")][three_proj_df$study == "GTEx",])
+tcga_count <- count(three_proj_df[,c("Tissue", "study")][three_proj_df$study == "TCGA",])
+other_count <- count(three_proj_df[,c("Tissue", "study")][three_proj_df$study == "other",])
+gtex_count <- gtex_count[,c(1,3)]
+tcga_count <- tcga_count[,c(1,3)]
+other_count <- other_count[,c(1,3)]
+colnames(gtex_count) <- c("Tissue", "gtex_freq")
+colnames(tcga_count) <- c("Tissue", "tcga_freq")
+colnames(other_count) <- c("Tissue", "other_freq")
+
+df_list <- list(gtex_count, tcga_count, other_count)
+merged_count <- Reduce(function(x, y) merge(x, y, all=TRUE), df_list, accumulate=FALSE)
+merged_count
+# 
+merged_count[is.na(merged_count)] <- 0
+
+merged_count$total <- merged_count$gtex_freq + merged_count$tcga_freq + merged_count$other_freq
+kbl(merged_count) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+  scroll_box(height = "500px")
+
+write.csv(merged_count, "09-01-2024public_rna_tiss_proj_sum.csv")
+
+y <- y[order(y$freq, decreasing = TRUE),]
+
+
+ggplot(y[1:10,], aes(x = Tissue, y = freq, fill = study)) + 
+  geom_bar(stat = "identity", width = 0.75) +  
+  theme(axis.text.x = element_text(hjust=1)) +
+  coord_flip() +
+  labs(y = "Tissue frequency (n=46410)")
+
+```
+```{r}
+three_proj_df <- df[df$proj_tiss_freq >= 30,] 
+three_proj_df[(three_proj_df$study != "GTEx" & three_proj_df$study != "TCGA"),]$study <- "other"
+gtex_count <- count(three_proj_df[,c("Tissue", "study")][three_proj_df$study == "GTEx",])
+tcga_count <- count(three_proj_df[,c("Tissue", "study")][three_proj_df$study == "TCGA",])
+other_count <- count(three_proj_df[,c("Tissue", "study")][three_proj_df$study == "other",])
+gtex_count <- gtex_count[,c(1,3)]
+tcga_count <- tcga_count[,c(1,3)]
+other_count <- other_count[,c(1,3)]
+colnames(gtex_count) <- c("Tissue", "gtex_freq")
+colnames(tcga_count) <- c("Tissue", "tcga_freq")
+colnames(other_count) <- c("Tissue", "other_freq")
+
+df_list <- list(gtex_count, tcga_count, other_count)
+merged_count <- Reduce(function(x, y) merge(x, y, all=TRUE), df_list, accumulate=FALSE)
+merged_count
+# 
+merged_count[is.na(merged_count)] <- 0
+
+merged_count <- merged_count %>%
+  mutate(Tissue = ifelse(Tissue == "fibroblasts_cell-lines_smooth-muscle-cell_mesenchymal-stem-cells",
+                         "Mesenchymal Cells",
+                         Tissue))
+
+merged_count <- merged_count %>%
+  mutate(Tissue = ifelse(Tissue == "derived-neural-progenitor_derived-neurons",
+                          "Derived Neurons",
+                         Tissue))
+
+merged_count$total <- merged_count$gtex_freq + merged_count$tcga_freq + merged_count$other_freq
+merged_count
+merged_count <- merged_count[order(merged_count$total, decreasing = TRUE), ]
+top_10 <- head(merged_count, 10)
+top_10_long <- tidyr::pivot_longer(top_10, cols = c("gtex_freq", "tcga_freq", "other_freq"))
+
+top_10_long$Tissue <- factor(top_10_long$Tissue, levels = top_10$Tissue)
+
+colnames(top_10_long)[3] = "Study"
+
+ggplot(top_10_long, aes(x = Tissue, y = value, fill = Study)) + 
+  geom_bar(stat = "identity", width = 0.75) +  
+  theme(axis.text.x = element_text(hjust=1)) +
+  coord_flip() +
+  labs(y = "Frequency") +
+  ggtitle("Top 10 tissue frequencies after threshold of 30 (n=19,850)") +
+  scale_fill_discrete(labels=c('GTEx', 'Other', 'TCGA'))
+
+ggsave(
+  "most2.png",
+  plot = last_plot(),
+  scale = 1,
+  width = 12,
+  height = 8,
+  dpi = 300
+)
+```
+```{r}
+colon_df <- df_merge[df_merge$Tissue.x == "Colon",]
+colon_no_gtex <- colon_df[colon_df$study.x != "GTEx",]
+colon_no_gtex_tcga <- colon_no_gtex[colon_no_gtex$study.x != "TCGA",]
+write.csv(colon_no_gtex_tcga, "colon_pub_rna.csv")
+```
